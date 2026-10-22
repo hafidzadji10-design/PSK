@@ -1,130 +1,386 @@
-let socket;
-let reconnectTimer;
-let manualFan = false;
-let manualLed = false;
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getDatabase, ref, onValue, update } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-const $ = id => document.getElementById(id);
+const firebaseConfig = {
+  apiKey: "AIzaSyBtbTmLhfZP1rwSxYzD3k7CiUMVbbjANxw",
+  authDomain: "proyek-sistem-a60d6.firebaseapp.com",
+  databaseURL: "https://proyek-sistem-a60d6-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "proyek-sistem-a60d6",
+  storageBucket: "proyek-sistem-a60d6.firebasestorage.app",
+  messagingSenderId: "369239306710",
+  appId: "1:369239306710:web:88b9f9bca5112df2c0b477"
+};
 
-function connectToEsp32() {
-  // Buka dashboard menggunakan alamat ESP32, misalnya http://192.168.1.50
-  const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${wsProtocol}//${location.host}/ws`;
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
 
-  socket = new WebSocket(wsUrl);
+const SENSORS_PATH = "smartSportCenter/sensors";
+const CONTROL_PATH = "smartSportCenter/control";
+const OFFLINE_AFTER_MS = 10000;
 
-  socket.addEventListener("open", () => {
-    $("connectionStatus").textContent = "Terhubung ke ESP32";
-    $("connectionDot").className = "dot connected";
-    clearTimeout(reconnectTimer);
-  });
+const elements = {
+  connectionDot: document.getElementById("connectionDot"),
+  connectionStatus: document.getElementById("connectionStatus"),
+  temperature: document.getElementById("temperature"),
+  humidity: document.getElementById("humidity"),
+  rfidCount: document.getElementById("rfidCount"),
+  touchCount: document.getElementById("touchCount"),
+  fanToggle: document.getElementById("fanToggle"),
+  fanStatus: document.getElementById("fanStatus"),
+  ledToggle: document.getElementById("ledToggle"),
+  ledStatus: document.getElementById("ledStatus"),
+  motionStatus: document.getElementById("motionStatus"),
+  motionIndicator: document.getElementById("motionIndicator"),
+  chartTempValue: document.getElementById("chartTempValue"),
+  chartHumidityValue: document.getElementById("chartHumidityValue"),
+  historyBody: document.getElementById("historyBody"),
+  lastUpdated: document.getElementById("lastUpdated"),
+  clearHistory: document.getElementById("clearHistory"),
+  servoToggle: document.getElementById("servoToggle"),
+  servoStatus: document.getElementById("servoStatus"),
+  lastRfid: document.getElementById("lastRfid")
+};
 
-  socket.addEventListener("message", event => {
-    try {
-      handleEsp32Data(JSON.parse(event.data));
-    } catch (error) {
-      console.error("Data ESP32 tidak valid:", error);
-    }
-  });
+let isConnected = false;
+let lastUpdatedAtValue = null;
+let lastChangeLocal = 0;
+let previous = {};
+const localHistory = [];
 
-  socket.addEventListener("close", () => {
-    $("connectionStatus").textContent = "Terputus — mencoba menyambung...";
-    $("connectionDot").className = "dot disconnected";
-    reconnectTimer = setTimeout(connectToEsp32, 2000);
-  });
+function setConnection(connected, message) {
+  isConnected = connected;
+  elements.connectionStatus.textContent = message;
+  elements.connectionDot.classList.toggle("connected", connected);
+  elements.connectionDot.classList.toggle("disconnected", !connected);
 
-  socket.addEventListener("error", () => socket.close());
+  // Kontrol hanya aktif jika ESP32 online.
+  elements.fanToggle.disabled = !connected;
+  elements.ledToggle.disabled = !connected;
+  if (elements.servoToggle) elements.servoToggle.disabled = !connected;
 }
 
-function handleEsp32Data(data) {
-  if (data.temperature !== undefined) {
-    $("temperature").textContent = `${Number(data.temperature).toFixed(1)}°C`;
-    $("chartTempValue").textContent = `${Number(data.temperature).toFixed(1)}°C`;
-  }
-
-  if (data.humidity !== undefined) {
-    $("humidity").textContent = `${Math.round(data.humidity)}%`;
-    $("chartHumidityValue").textContent = `${Math.round(data.humidity)}%`;
-  }
-
-  if (data.rfidCount !== undefined) {
-    $("rfidCount").textContent = data.rfidCount;
-  }
-
-  if (data.touchCount !== undefined) {
-    $("touchCount").textContent = data.touchCount;
-  }
-
-  if (data.fan !== undefined) {
-    $("fanStatus").textContent = data.fan ? "MENYALA" : "MATI";
-    if (!manualFan) $("fanToggle").checked = Boolean(data.fan);
-  }
-
-  if (data.led !== undefined) {
-    $("ledStatus").textContent = data.led ? "Menyala" : "Mati";
-    if (!manualLed) $("ledToggle").checked = Boolean(data.led);
-  }
-
-  if (data.motion !== undefined) {
-    $("motionStatus").textContent = data.motion ? "Gerakan terdeteksi" : "Tidak ada gerakan";
-  }
-
-  if (data.event) addHistory(data.event);
+function setText(element, text) {
+  if (element) element.textContent = text;
 }
 
-function sendCommand(command, value) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    $("connectionStatus").textContent = "ESP32 belum terhubung";
+function formatTemperature(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(1)}°C` : "--.-°C";
+}
+
+function formatHumidity(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${Math.round(number)}%` : "--%";
+}
+
+function setSwitchState(input, value) {
+  if (typeof value === "boolean") {
+    input.checked = value;
+  } else if (value === 1 || value === "ON" || value === "on") {
+    input.checked = true;
+  } else if (value === 0 || value === "OFF" || value === "off") {
+    input.checked = false;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => {
+    const replacements = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;"
+    };
+    return replacements[character];
+  });
+}
+
+function renderHistory(history) {
+  if (!Array.isArray(history) || history.length === 0) {
+    elements.historyBody.innerHTML = `
+      <tr><td colspan="4" class="empty-row">Belum ada riwayat aktivitas.</td></tr>
+    `;
     return;
   }
 
-  socket.send(JSON.stringify({ command, value }));
+  const rows = history.slice(-30).reverse();
+
+  elements.historyBody.innerHTML = rows.map((item) => {
+    const time = escapeHtml(item.time ?? item.timestamp ?? "--");
+    const sensor = escapeHtml(item.sensor ?? item.type ?? "Sensor");
+    const activity = escapeHtml(item.activity ?? item.message ?? "--");
+    const status = escapeHtml(item.status ?? "Berhasil");
+
+    return `
+      <tr>
+        <td>${time}</td>
+        <td>${sensor}</td>
+        <td>${activity}</td>
+        <td><span class="status-tag">${status}</span></td>
+      </tr>
+    `;
+  }).join("");
 }
 
-function addHistory(event) {
-  const body = $("historyBody");
+// Riwayat dibuat di browser dari perubahan data (ESP32 belum kirim history).
+function addHistory(sensor, activity, status = "Berhasil") {
+  localHistory.push({
+    time: new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta" }),
+    sensor,
+    activity,
+    status
+  });
+  if (localHistory.length > 30) localHistory.shift();
+  renderHistory(localHistory);
+}
 
-  if (body.querySelector(".empty-row")) body.innerHTML = "";
+function trackChanges(data) {
+  if (previous.fan !== undefined && data.fan !== undefined && data.fan !== previous.fan) {
+    addHistory("Kipas", data.fan ? "Dinyalakan" : "Dimatikan");
+  }
+  if (previous.led !== undefined && data.led !== undefined && data.led !== previous.led) {
+    addHistory("LED", data.led ? "Dinyalakan" : "Dimatikan");
+  }
+  if (previous.motion !== undefined && data.motion !== undefined && data.motion !== previous.motion) {
+    addHistory("PIR", data.motion ? "Gerakan terdeteksi" : "Gerakan berhenti");
+  }
+  if (previous.rfidCount !== undefined && data.rfidCount !== undefined && data.rfidCount !== previous.rfidCount) {
+    addHistory("RFID", "Kartu terbaca");
+  }
+  if (previous.touchCount !== undefined && data.touchCount !== undefined && data.touchCount !== previous.touchCount) {
+    addHistory("Touch", "Sentuhan terdeteksi");
+  }
+  if (previous.servo !== undefined && data.servo !== undefined && data.servo !== previous.servo) {
+    addHistory("Servo", data.servo ? "Dibuka" : "Ditutup");
+  }
+  previous = { ...data };
+}
 
-  const row = document.createElement("tr");
-  const values = [
-    new Date().toLocaleTimeString("id-ID"),
-    event.sensor || "ESP32",
-    event.activity || "Aktivitas terdeteksi",
-    event.status || "Berhasil"
-  ];
+function updateDashboard(data) {
+  if (!data || typeof data !== "object") {
+    throw new Error("Format data status tidak valid.");
+  }
 
-  values.forEach((value, index) => {
-    const cell = document.createElement("td");
+  if (data.temperature !== undefined) {
+    const t = Number(data.temperature);
+    elements.temperature.innerHTML = Number.isFinite(t)
+      ? `${t.toFixed(1)}<small>°C</small>`
+      : `--.-<small>°C</small>`;
+    setText(elements.chartTempValue, formatTemperature(data.temperature));
+  }
 
-    if (index === 3) {
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = value;
-      cell.appendChild(badge);
-    } else {
-      cell.textContent = value;
+  if (data.humidity !== undefined) {
+    const h = Number(data.humidity);
+    elements.humidity.innerHTML = Number.isFinite(h)
+      ? `${Math.round(h)}<small>%</small>`
+      : `--<small>%</small>`;
+    setText(elements.chartHumidityValue, formatHumidity(data.humidity));
+  }
+
+  if (data.rfidCount !== undefined) {
+    elements.rfidCount.textContent = String(data.rfidCount);
+  }
+
+  if (data.lastRfid !== undefined) {
+    setText(elements.lastRfid, `Kartu terakhir: ${data.lastRfid}`);
+  }
+
+  if (data.touchCount !== undefined) {
+    elements.touchCount.textContent = String(data.touchCount);
+  }
+
+  if (data.fan !== undefined) {
+    setSwitchState(elements.fanToggle, data.fan);
+  }
+  elements.fanStatus.textContent = elements.fanToggle.checked ? "MENYALA" : "MATI";
+
+  if (data.led !== undefined) {
+    setSwitchState(elements.ledToggle, data.led);
+  }
+  elements.ledStatus.textContent = elements.ledToggle.checked ? "MENYALA" : "MATI";
+
+  if (elements.servoToggle) {
+    if (data.servo !== undefined) {
+      setSwitchState(elements.servoToggle, data.servo);
+    }
+    setText(elements.servoStatus, elements.servoToggle.checked ? "TERBUKA" : "TERTUTUP");
+  }
+
+  if (data.motion !== undefined) {
+    const motionDetected =
+      data.motion === true ||
+      data.motion === 1 ||
+      data.motion === "1" ||
+      data.motion === "detected";
+
+    elements.motionStatus.textContent = motionDetected
+      ? "Gerakan terdeteksi"
+      : "Tidak ada gerakan";
+
+    elements.motionIndicator.classList.toggle("active", motionDetected);
+  }
+
+  setText(elements.lastUpdated,
+    `Diperbarui ${new Date().toLocaleTimeString("id-ID")}`);
+}
+
+// Pengganti fetchStatus(): dengarkan Firebase secara realtime.
+function startListening() {
+  onValue(ref(db, SENSORS_PATH), (snapshot) => {
+    const data = snapshot.val();
+    if (!data) return;
+
+    // updatedAt berubah setiap ESP32 mengirim data -> ESP32 hidup.
+    if (data.updatedAt !== lastUpdatedAtValue) {
+      lastUpdatedAtValue = data.updatedAt;
+      lastChangeLocal = Date.now();
+      setConnection(true, "ESP32 online");
     }
 
-    row.appendChild(cell);
+    try {
+      updateDashboard(data);
+      trackChanges(data);
+    } catch (error) {
+      console.error(error);
+    }
+  }, (error) => {
+    console.error("Gagal membaca Firebase:", error);
+    setConnection(false, "Gagal membaca Firebase");
   });
 
-  body.prepend(row);
-  while (body.rows.length > 20) body.deleteRow(body.rows.length - 1);
+  setInterval(() => {
+    if (lastChangeLocal && Date.now() - lastChangeLocal > OFFLINE_AFTER_MS) {
+      setConnection(false, "ESP32 offline");
+    }
+  }, 1000);
 }
 
-$("fanToggle").addEventListener("change", event => {
-  manualFan = true;
-  sendCommand("fan", event.target.checked);
+// Pengganti sendControl(): tulis perintah ke Firebase.
+async function sendControl(device, enabled) {
+  if (!isConnected) {
+    alert("ESP32 belum online.");
+    return false;
+  }
+
+  try {
+    await update(ref(db, CONTROL_PATH), { [device]: enabled });
+    return true;
+  } catch (error) {
+    console.error(`Gagal mengubah ${device}:`, error);
+    alert("Gagal mengirim perintah ke Firebase.");
+    return false;
+  }
+}
+
+elements.fanToggle.addEventListener("change", async (event) => {
+  const requestedState = event.target.checked;
+  const success = await sendControl("fan", requestedState);
+
+  if (!success) {
+    event.target.checked = !requestedState;
+    elements.fanStatus.textContent = event.target.checked ? "MENYALA" : "MATI";
+  }
 });
 
-$("ledToggle").addEventListener("change", event => {
-  manualLed = true;
-  sendCommand("led", event.target.checked);
+elements.ledToggle.addEventListener("change", async (event) => {
+  const requestedState = event.target.checked;
+  const success = await sendControl("led", requestedState);
+
+  if (!success) {
+    event.target.checked = !requestedState;
+    elements.ledStatus.textContent = event.target.checked ? "MENYALA" : "MATI";
+  }
 });
 
-$("clearHistory").addEventListener("click", () => {
-  $("historyBody").innerHTML =
-    '<tr><td colspan="4" class="empty-row">Riwayat tampilan dihapus.</td></tr>';
+if (elements.servoToggle) {
+  elements.servoToggle.addEventListener("change", async (event) => {
+    const requestedState = event.target.checked;
+    const success = await sendControl("servo", requestedState);
+
+    if (!success) {
+      event.target.checked = !requestedState;
+      setText(elements.servoStatus, event.target.checked ? "TERBUKA" : "TERTUTUP");
+    }
+  });
+}
+
+elements.clearHistory.addEventListener("click", () => {
+  localHistory.length = 0;
+  elements.historyBody.innerHTML = `
+    <tr><td colspan="4" class="empty-row">
+      Tampilan riwayat dikosongkan. Data di Firebase tidak dihapus.
+    </td></tr>
+  `;
 });
 
-connectToEsp32();
+function updateDateTime() {
+  const now = new Date();
+
+  document.getElementById("currentDate").textContent =
+    new Intl.DateTimeFormat("id-ID", {
+      timeZone: "Asia/Jakarta",
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric"
+    }).format(now);
+
+  document.getElementById("currentTime").textContent =
+    new Intl.DateTimeFormat("id-ID", {
+      timeZone: "Asia/Jakarta",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).format(now);
+}
+
+updateDateTime();
+setInterval(updateDateTime, 1000);
+
+// ===== Mode gelap / terang =====
+const themeToggle = document.getElementById("themeToggle");
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  if (themeMeta) themeMeta.setAttribute("content", theme === "dark" ? "#0b1020" : "#315efb");
+  if (themeToggle) {
+    const next = theme === "dark" ? "terang" : "gelap";
+    themeToggle.setAttribute("aria-label", `Ganti ke mode ${next}`);
+    themeToggle.setAttribute("title", `Ganti ke mode ${next}`);
+  }
+}
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+
+applyTheme(currentTheme());
+
+if (themeToggle) {
+  themeToggle.addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    applyTheme(next);
+    try { localStorage.setItem("theme", next); } catch (e) {}
+  });
+}
+
+// Ikuti pengaturan sistem selama pengguna belum memilih manual.
+systemDark.addEventListener("change", (event) => {
+  let saved = null;
+  try { saved = localStorage.getItem("theme"); } catch (e) {}
+  if (!saved) applyTheme(event.matches ? "dark" : "light");
+});
+
+// Mulai
+setConnection(false, "Menghubungkan ke Firebase...");
+signInAnonymously(auth)
+  .then(startListening)
+  .catch((error) => {
+    console.error("Anonymous sign-in gagal:", error);
+    setConnection(false, "Login Firebase gagal");
+  });

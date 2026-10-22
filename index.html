@@ -4,104 +4,181 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Smart Sport Center — ESP32</title>
+  <meta name="theme-color" content="#315efb">
+  <script>
+    // Terapkan tema sebelum render agar tidak berkedip.
+    (function () {
+      var theme = "light";
+      try {
+        var saved = localStorage.getItem("theme");
+        if (saved === "dark" || saved === "light") {
+          theme = saved;
+        } else if (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) {
+          theme = "dark";
+        }
+      } catch (e) {}
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
   <link rel="stylesheet" href="style.css">
-  <script src="script.js" defer></script>
+  <script type="module" src="script.js"></script>
 </head>
 <body>
-  <div class="app">
+  <main class="dashboard">
     <header class="topbar">
-      <a class="brand" href="#">SMART <span>SPORT CENTER</span></a>
+      <a class="brand" href="#">
+        SMART <span>SPORT CENTER</span>
+      </a>
+
       <div class="connection">
-        <span id="connectionDot" class="dot"></span>
-        <span id="connectionStatus">Menghubungkan ke ESP32...</span>
+        <span id="connectionDot" class="connection-dot"></span>
+        <span id="connectionStatus">Menghubungkan ke Firebase...</span>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="datetime">
+          <span id="currentDate"></span>
+          <div class="time-row">
+            <strong id="currentTime"></strong>
+            <span class="timezone">WIB</span>
+          </div>
+        </div>
+
+        <button id="themeToggle" class="theme-toggle" type="button"
+                aria-label="Ganti ke mode gelap" title="Ganti tema">
+          <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+          </svg>
+          <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+        </button>
       </div>
     </header>
 
-    <main id="dashboard">
-      <section class="metrics">
-        <article class="metric-card">
-          <div class="metric-icon orange">♨</div>
-          <div><p>Suhu</p><h2 id="temperature">--.-°C</h2><small></small></div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-icon pink">💧</div>
-          <div><p>Kelembapan</p><h2 id="humidity">--%</h2><small></small></div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-icon green">▣</div>
-            <div><p>Total masuk RFID</p><h2 id="rfidCount">0</h2><small></small></div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-icon purple">↗</div>
-          <div><p>Total keluar Touch</p><h2 id="touchCount">0</h2><small></small></div>
-        </article>
+    <section class="metrics" aria-label="Data sensor">
+      <article class="metric-card">
+        <span class="metric-label">Suhu</span>
+        <strong id="temperature" class="metric-value">--.-<small>°C</small></strong>
+        <span class="metric-note">Sensor DHT22</span>
+      </article>
+
+      <article class="metric-card">
+        <span class="metric-label">Kelembapan</span>
+        <strong id="humidity" class="metric-value">--<small>%</small></strong>
+        <span class="metric-note">Sensor DHT22</span>
+      </article>
+
+      <article class="metric-card">
+        <span class="metric-label">Total masuk RFID</span>
+        <strong id="rfidCount" class="metric-value">0</strong>
+        <span id="lastRfid" class="metric-note">Akses masuk</span>
+      </article>
+
+      <article class="metric-card">
+        <span class="metric-label">Total keluar Touch</span>
+        <strong id="touchCount" class="metric-value">0</strong>
+        <span class="metric-note">Akses keluar</span>
+      </article>
+    </section>
+
+    <section class="content-grid">
+      <section class="panel history-panel">
+        <div class="panel-heading">
+          <div>
+            <h1>Riwayat Aktivitas</h1>
+            <p>Data realtime dari ESP32 · <span id="lastUpdated">Menunggu data...</span></p>
+          </div>
+
+          <button id="clearHistory"
+                  class="button button-light"
+                  type="button">
+            Hapus tampilan
+          </button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Waktu</th>
+                <th>Jenis sensor</th>
+                <th>Aktivitas</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+
+            <tbody id="historyBody">
+              <tr>
+                <td colspan="4" class="empty-row">
+                  Menunggu data dari ESP32...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
-      <section class="content-grid">
-        <section class="panel history-panel">
+      <aside class="side-column">
+        <section class="panel">
           <div class="panel-heading">
             <div>
-              <h2>Riwayat Aktivitas</h2>
-              <p>Data diterima langsung dari ESP32</p>
+              <h2>Kontrol Kipas</h2>
+              <p>Kontrol manual melalui ESP32</p>
             </div>
-            <button id="clearHistory" class="btn light-btn">Hapus riwayat</button>
           </div>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Waktu</th><th>Sensor</th><th>Aktivitas</th><th>Status</th></tr>
-              </thead>
-              <tbody id="historyBody">
-                <tr><td colspan="4" class="empty-row">Menunggu data dari ESP32...</td></tr>
-              </tbody>
-            </table>
+          <div class="device-row">
+            <div>
+              <span class="device-label">Status kipas</span>
+              <strong id="fanStatus" class="device-status">--</strong>
+            </div>
+
+            <label class="switch" aria-label="Kontrol kipas">
+              <input id="fanToggle" type="checkbox" disabled>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </section>  
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Gerakan & Lampu</h2>
+              <p>Status sensor PIR dan LED</p>
+            </div>
+          </div>
+
+          <div class="device-row">
+            <div>
+              <span class="device-label">Sensor PIR</span>
+              <strong id="motionStatus" class="device-status">
+                Menunggu sensor...
+              </strong>
+            </div>
+
+            <span id="motionIndicator" class="motion-indicator"></span>
+          </div>
+
+          <div class="device-row">
+            <div>
+              <span class="device-label">Lampu LED</span>
+              <strong id="ledStatus" class="device-status">--</strong>
+            </div>
+
+            <label class="switch" aria-label="Kontrol lampu LED">
+              <input id="ledToggle" type="checkbox" disabled>
+              <span class="slider"></span>
+            </label>
           </div>
         </section>
+      </aside>
+    </section>
 
-        <aside class="side-column">
-          <article class="panel">
-            <div class="panel-heading"><h2>Kontrol Kipas</h2></div>
-            <div class="device-row">
-              <div>
-                <b>Status kipas</b>
-                <span id="fanStatus">--</span>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="fanToggle">
-                <span class="slider"></span>
-              </label>
-            </div>
-            <p class="hint">Kontrol manual dari dashboard. Pastikan driver kipas terpasang.</p>
-          </article>
-
-          <article class="panel">
-            <div class="panel-heading"><h2>Gerakan & Lampu</h2></div>
-            <div class="device-row">
-              <div><b>Sensor PIR</b><span id="motionStatus">Menunggu sensor...</span></div>
-            </div>
-            <div class="device-row">
-              <div><b>LED</b><span id="ledStatus">Mati</span></div>
-              <label class="switch">
-                <input type="checkbox" id="ledToggle">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-heading"><h2>Suhu & kelembapan</h2></div>
-            <div class="chart-values">
-              <div><span>Suhu</span><strong id="chartTempValue">--.-°C</strong></div>
-              <div><span>Kelembapan</span><strong id="chartHumidityValue">--%</strong></div>
-            </div>
-            <p class="hint">Nilai diperbarui berkala dari DHT22.</p>
-          </article>
-        </aside>
-      </section>
-    </main>
-
-    <footer>ESP32 • DHT22 • RFID RC522 • Touch • PIR • Kipas • LED</footer>
-  </div>
+    <footer>
+      ESP32 · DHT22 · RFID RC522 · Touch Sensor · PIR · Kipas · LED · Servo
+    </footer>
+  </main>
 </body>
 </html>

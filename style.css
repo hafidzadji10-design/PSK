@@ -1321,7 +1321,7 @@ footer {
 /* ---------- Topbar: brand | status | (tanggal + tombol) ---------- */
 .topbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
 }
@@ -1332,7 +1332,7 @@ footer {
 }
 
 .topbar .connection {
-  justify-self: center;
+  justify-self: start;
   margin: 0;
 }
 
@@ -1356,7 +1356,7 @@ footer {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 10px 12px;
     padding: 14px;
   }
@@ -1366,7 +1366,7 @@ footer {
   }
 
   .topbar .connection {
-    margin-left: auto;
+    margin-left: 0;
   }
 
   .topbar-actions .datetime {
@@ -1564,109 +1564,5 @@ td,
 
   .side-column {
     padding-right: 2px;
-  }
-}
-
-/* =========================================================
-   TOMBOL TOGGLE TEMA (terang / gelap) — semua perangkat
-   Membutuhkan <html data-theme="light|dark"> dan markup:
-
-   <button id="themeToggle" class="theme-toggle" type="button">
-     <svg class="icon icon-moon" ...>...</svg>
-     <svg class="icon icon-sun" ...>...</svg>
-   </button>
-   ========================================================= */
-
-.theme-toggle {
-  position: relative;
-  flex: 0 0 auto;
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  color: #fff;
-  cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.32);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.16);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  -webkit-tap-highlight-color: transparent;
-  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.theme-toggle:hover {
-  background: rgba(255, 255, 255, 0.28);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
-}
-
-.theme-toggle:active {
-  transform: scale(0.94);
-}
-
-.theme-toggle:focus-visible {
-  outline: 3px solid rgba(255, 255, 255, 0.7);
-  outline-offset: 2px;
-}
-
-/* Ikon bertumpuk di satu sel, saling bertukar dengan animasi */
-.theme-toggle .icon {
-  grid-area: 1 / 1;
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: opacity 0.25s ease, transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* Mode terang: bulan terlihat (klik -> gelap) */
-.theme-toggle .icon-moon { opacity: 1; transform: rotate(0) scale(1); }
-.theme-toggle .icon-sun  { opacity: 0; transform: rotate(-90deg) scale(0.5); }
-
-/* Mode gelap: matahari terlihat (klik -> terang) */
-:root[data-theme="dark"] .theme-toggle .icon-moon { opacity: 0; transform: rotate(90deg) scale(0.5); }
-:root[data-theme="dark"] .theme-toggle .icon-sun  { opacity: 1; transform: rotate(0) scale(1); }
-
-/* Ponsel: tombol mengambang di pojok kanan bawah.
-   Catatan: jangan taruh tombol di dalam elemen yang punya
-   backdrop-filter / transform / filter, karena "fixed" akan
-   mengikuti elemen itu, bukan layar. */
-@media (max-width: 700px) {
-  .theme-toggle {
-    position: fixed;
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(16px, env(safe-area-inset-bottom));
-    z-index: 1000;
-    width: 52px;
-    height: 52px;
-    border: 0;
-    background: linear-gradient(135deg, #315efb, #7c3aed);
-    box-shadow:
-      0 8px 22px rgba(49, 94, 251, 0.45),
-      0 2px 6px rgba(0, 0, 0, 0.25),
-      0 0 0 1px rgba(255, 255, 255, 0.14);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-
-  .theme-toggle:hover {
-    background: linear-gradient(135deg, #4a72ff, #8b4cf0);
-  }
-
-  .theme-toggle .icon {
-    width: 24px;
-    height: 24px;
-  }
-}
-
-/* Hormati preferensi "kurangi animasi" */
-@media (prefers-reduced-motion: reduce) {
-  .theme-toggle,
-  .theme-toggle .icon {
-    transition: none;
   }
 }
